@@ -1,8 +1,7 @@
-module Gossip where
+module Distributed.Gossip where
 
 import Network
 import System.IO
-import System.Time
 import Data.Map as Map
 
 rendezvous = "192.168.1.200"
@@ -43,19 +42,23 @@ merge current new = Map.fold newest (difference current new) new
                                 else insert (getID currentNode) currentNode acc
 
 getID :: Node -> ID
-getID node = makeID (getHostName node) (show $ getTime node)
+getID node = makeID (getHostName node) (getTime node)
 
 makeID :: HostName -> Time -> ID
-makeID hostname time = hostname ++ "|" ++ time
+makeID hostname time = hostname ++ "|" ++ (show time)
 
 sendList :: Map ID Node -> Node -> IO()
-sendList map node = sendTo (getHostName node) defaultPort (show $ toList set)
+sendList map node = sendTo (getHostName node) defaultPort (show $ toList map)
 
 updateMe :: Map ID Node -> HostName -> Time -> Map ID Node
-updateMe map hostname joinTime =
-  let identifier = makeID hostname joinTime in
-  case Map.lookup identifier map of
-    Nothing -> 
+updateMe map hostname time =
+    let identifier = makeID hostname time in
+    case Map.lookup identifier map of
+      Nothing -> 
+          insert identifier (Node hostname 1 time Alive) map
+      Just (Node _ heartbeats _ _) -> 
+          insert identifier (Node hostname (heartbeats + 1) time Alive) map
+
 
 
 
