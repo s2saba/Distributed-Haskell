@@ -115,16 +115,16 @@ connectToContact mapMVar config port = do
 
 sendGossip :: HostName -> Time -> Map ID Node -> PortID -> IO ()
 sendGossip myhost join memmap port = do
-  let othermem = Map.filter (\(Node host njoin _ _ status) ->
-                              if (host == myhost && join == njoin) then
-                                False
-                              else if status == Dead then
-                                     False
-                                   else
-                                     True ) memmap    --Map.delete (makeID myhost join) memmap 
+  let othermem = Map.delete (makeID myhost join) memmap
+      notdead = Map.filter (\(Node _ _ _ _ status) ->
+                             if status == Dead then
+                               False
+                             else
+                               True ) memmap
       hosts = Prelude.map (\x -> hostName x) $ elems othermem
       count = length hosts
   x <- sequence $ replicate (ceiling $ (fromIntegral count) / 2) $ randomRIO (0, (count - 1))
   putStrLn $ show x
-  sequence $ Prelude.map (\y -> try $ Network.sendTo (hosts !! y) port $ show memmap :: IO (Either SomeException ())) x
+  sequence $ Prelude.map (\y ->
+                           try $ Network.sendTo (hosts !! y) port $ show notdead :: IO (Either SomeException ())) x
   putStrLn $ "Sent to hosts" ++ (show $ Prelude.map (\y -> hosts !! y) x)
