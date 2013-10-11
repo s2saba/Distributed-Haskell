@@ -44,18 +44,22 @@ handleConnections :: Socket -> MVar (Map ID Node) -> IO ()
 handleConnections sock mvarMap = do
   putStrLn "Waiting for connections."
   (handle, hostname, port) <- Network.accept sock
-  forkIO $ handleAccepted handle mvarMap
+  forkIO $ handleAccepted handle mvarMap hostname
   handleConnections sock mvarMap
 
-handleAccepted :: Handle -> MVar (Map ID Node) -> IO ()
-handleAccepted handle mvarMap = do
+handleAccepted :: Handle -> MVar (Map ID Node) -> HostName -> IO ()
+handleAccepted handle mvarMap host = do
   gotmap <- hGetContents handle
-  case reads $ strip gotmap of
-    [(nodemap,"")] -> do
-      (TOD time _) <- getClockTime
-      modifyMVar mvarMap (\x -> return $ (Gossip.merge x nodemap time, ()))
-    _ -> putStrLn "Failed to parse message."
-  hClose handle
+  (TOD time _) <- getClockTime
+  if strip gotmap == "Join" then
+    modifyMVar mvarMap (\x -> return $ (insert (makeID host time) (Node host time 1 time Alive) x, ()))
+    else
+    case (reads $ strip gotmap) of
+      [(nodemap,"")] -> do
+        modifyMVar mvarMap (\x -> return $ (Gossip.merge x nodemap time, ()))
+      _ -> do
+        putStrLn "Failed to parse message."
+        hClose handle
   
 getConfigOrFail :: IO (ConfigParser)
 getConfigOrFail = do
