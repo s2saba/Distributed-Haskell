@@ -24,9 +24,10 @@ runGossip = do
   let ip = getCrucial config "gossip" "bindip"
   let port = PortNumber (PortNum $ getCrucial config "gossip" "contactport")
   mapmvar <- newMVar membermap
-  tmr <- repeatedTimer (doUpdate ip time port mapmvar) $ sDelay 1
   x <- newEmptyMVar
   listener <- forkIO $ listenForGossip mapmvar x $ port
+  connectToContact mapmvar config port
+  tmr <- repeatedTimer (doUpdate ip time port mapmvar) $ sDelay 1
   takeMVar x
   return tmr
 
@@ -56,10 +57,6 @@ handleAccepted handle mvarMap = do
     _ -> putStrLn "Failed to parse message."
   hClose handle
   putStrLn $ "\"" ++ gotmap ++ "\""
-
---sendGossip :: MVar (Map ID Node) -> Int -> IO ()
---sendGossip mvarMap count = do
-  
   
 getConfigOrFail :: IO (ConfigParser)
 getConfigOrFail = do
@@ -70,13 +67,19 @@ getConfigOrFail = do
 
 initialize :: ConfigParser -> Time -> Map ID Node
 initialize conf time =
-    let ip = getCrucial conf "gossip" "bindip" in
-    updateMe Map.empty ip time time
+  let val = getValue conf "gossip" "contactip" :: Either String String in 
+  case val of
+    Right host ->
+      let ip = getCrucial conf "gossip" "bindip" in
+      updateMe Map.empty ip time time
+    Left err ->
+      Map.empty
 
 
 doUpdate :: HostName -> Time -> PortID -> MVar (Map ID Node) -> IO()
 doUpdate host join port mvarMap = do
   (TOD now _) <- getClockTime
+  memmap <- readMVar mvarMap
   modifyMVar mvarMap (\x -> return $ (updateMe x host join now, ()))
   modifyMVar mvarMap (\x -> return $ (markFailed x now, ()))
   modifyMVar mvarMap (\x -> do
@@ -84,7 +87,6 @@ doUpdate host join port mvarMap = do
                                                      ((hostName y), (getStatus y))) $ elems x
                          putStrLn $ show hostmap
                          return (x, ()))
-  memmap <- readMVar mvarMap
   sendGossip host join memmap port
   return ()
   
@@ -94,6 +96,19 @@ getCrucial cp section key =
     case val of
       Left err -> error $ "Failed to get value from config: " ++ err
       Right v -> v
+
+connectToContact :: MVar (Map ID Node) -> ConfigParser -> PortID -> IO()
+connectToContact mapMVar config port = do
+  memmap <- readMVar mapMVar
+  if memmap == Map.empty then
+    let val = getValue config "gossip" "contactip" in
+    case val of
+      Left err -> return ()
+      Right host -> do
+        try $ Network.sendTo host port "Join" :: IO(Either SomeException ())
+        connectToContact mapMVar config port
+  else
+   return ()
 
 sendGossip :: HostName -> Time -> Map ID Node -> PortID -> IO ()
 sendGossip myhost join memmap port = do
