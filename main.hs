@@ -68,10 +68,10 @@ initialize :: ConfigParser -> Time -> Map ID Node
 initialize conf time =
   let val = getValue conf "gossip" "contactip" :: Either String String in 
   case val of
-    Right host ->
+    Left err ->
       let ip = getCrucial conf "gossip" "bindip" in
       updateMe Map.empty ip time time
-    Left err ->
+    Right host ->
       Map.empty
 
 
