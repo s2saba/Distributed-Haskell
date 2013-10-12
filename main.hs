@@ -26,8 +26,7 @@ runGossip = do
   mapmvar <- newMVar membermap
   x <- newEmptyMVar
   listener <- forkIO $ listenForGossip mapmvar x $ port
-  connectToContact mapmvar config port
-  tmr <- repeatedTimer (doUpdate ip time port mapmvar) $ sDelay 1
+  tmr <- repeatedTimer (doUpdate config ip time port mapmvar) $ sDelay 1
   takeMVar x
   return tmr
 
@@ -42,7 +41,7 @@ listenForGossip mvarMap block port = do
 
 handleConnections :: Socket -> MVar (Map ID Node) -> IO ()
 handleConnections sock mvarMap = do
-  putStrLn "Waiting for connections."
+--  putStrLn "Waiting for connections."
   (handle, hostname, port) <- Network.accept sock
   forkIO $ handleAccepted handle mvarMap hostname
   handleConnections sock mvarMap
@@ -79,18 +78,22 @@ initialize conf time =
       Map.empty
 
 
-doUpdate :: HostName -> Time -> PortID -> MVar (Map ID Node) -> IO()
-doUpdate host join port mvarMap = do
+doUpdate :: ConfigParser -> HostName -> Time -> PortID -> MVar (Map ID Node) -> IO()
+doUpdate config host join port mvarMap = do
   (TOD now _) <- getClockTime
-  memmap <- readMVar mvarMap
+
   modifyMVar mvarMap (\x -> return $ (updateMe x host join now, ()))
   modifyMVar mvarMap (\x -> return $ (markFailed x now, ()))
   modifyMVar mvarMap (\x -> do
                          let hostmap = Prelude.map (\y ->
-                                                     ((hostName y), (getStatus y))) $ elems x
+                                                     ((hostName y), (joinTime y), (getStatus y))) $ elems x
                          putStrLn $ show hostmap
                          return (x, ()))
-  sendGossip host join memmap port
+  memmap <- readMVar mvarMap
+  if size memmap <= 1 then
+    sendJoin config port
+  else
+    sendGossip host join memmap port
   return ()
   
 getCrucial :: (Get_C a) => ConfigParser -> String -> String -> a
@@ -100,18 +103,14 @@ getCrucial cp section key =
       Left err -> error $ "Failed to get value from config: " ++ err
       Right v -> v
 
-connectToContact :: MVar (Map ID Node) -> ConfigParser -> PortID -> IO()
-connectToContact mapMVar config port = do
-  memmap <- readMVar mapMVar
-  if memmap == Map.empty then
-    let val = getValue config "gossip" "contactip" in
+sendJoin :: ConfigParser -> PortID -> IO ()
+sendJoin config port = do
+  let val = getValue config "gossip" "contactip" in
     case val of
       Left err -> return ()
       Right host -> do
         try $ Network.sendTo host port "Join" :: IO(Either SomeException ())
-        connectToContact mapMVar config port
-  else
-   return ()
+        return ()
 
 sendGossip :: HostName -> Time -> Map ID Node -> PortID -> IO ()
 sendGossip myhost join memmap port = do
@@ -124,7 +123,6 @@ sendGossip myhost join memmap port = do
       hosts = Prelude.map (\x -> hostName x) $ elems othermem
       count = length hosts
   x <- sequence $ replicate (ceiling $ (fromIntegral count) / 2) $ randomRIO (0, (count - 1))
-  putStrLn $ show x
   sequence $ Prelude.map (\y ->
                            try $ Network.sendTo (hosts !! y) port $ show notdead :: IO (Either SomeException ())) x
   putStrLn $ "Sent to hosts" ++ (show $ Prelude.map (\y -> hosts !! y) x)
