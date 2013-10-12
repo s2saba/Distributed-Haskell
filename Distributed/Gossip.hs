@@ -59,10 +59,11 @@ updateMe memmap hostname time nowTime =
         insert identifier (Node hostname time (heartbeats + 1) nowTime Alive) memmap
 
 markFailed :: Map ID Node -> Time -> Map ID Node
-markFailed memmap nowTime = Map.map setFailed memmap
+markFailed memmap nowTime = Map.mapMaybe setFailed memmap
   where setFailed (Node host join heartBeat time status)
-          | (time + 5) < nowTime = (Node host join heartBeat time Dead)
-          | otherwise = (Node host join heartBeat time status)
+          | (time + 10) < nowTime = Nothing
+          | (time + 5) < nowTime = Just (Node host join heartBeat time Dead)
+          | otherwise = Just (Node host join heartBeat time status)
                    
                    
 xNode = Node "192.168.1.200" 1 100 12 Alive

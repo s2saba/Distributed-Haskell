@@ -11,6 +11,9 @@ import Control.Concurrent.Timer
 import Control.Concurrent.Suspend.Lifted
 import Data.Word
 import Data.String.Utils
+import System.Random
+import Control.Monad.State
+import Control.Exception
 
 main = runGossip
 
@@ -19,11 +22,11 @@ runGossip = do
   config <- getConfigOrFail
   let membermap = initialize config time
   let ip = getCrucial config "gossip" "bindip"
-  let port = getCrucial config "gossip" "contactport"
+  let port = PortNumber (PortNum $ getCrucial config "gossip" "contactport")
   mapmvar <- newMVar membermap
-  tmr <- repeatedTimer (doUpdate ip time mapmvar) $ sDelay 1
+  tmr <- repeatedTimer (doUpdate ip time port mapmvar) $ sDelay 1
   x <- newEmptyMVar
-  listener <- forkIO $ listenForGossip mapmvar x $ PortNumber (PortNum port)
+  listener <- forkIO $ listenForGossip mapmvar x $ port
   takeMVar x
   return tmr
 
@@ -54,6 +57,9 @@ handleAccepted handle mvarMap = do
   hClose handle
   putStrLn $ "\"" ++ gotmap ++ "\""
 
+--sendGossip :: MVar (Map ID Node) -> Int -> IO ()
+--sendGossip mvarMap count = do
+  
   
 getConfigOrFail :: IO (ConfigParser)
 getConfigOrFail = do
@@ -68,14 +74,18 @@ initialize conf time =
     updateMe Map.empty ip time time
 
 
-doUpdate :: HostName -> Time -> MVar (Map ID Node) -> IO()
-doUpdate host join mvarMap = do
+doUpdate :: HostName -> Time -> PortID -> MVar (Map ID Node) -> IO()
+doUpdate host join port mvarMap = do
   (TOD now _) <- getClockTime
   modifyMVar mvarMap (\x -> return $ (updateMe x host join now, ()))
   modifyMVar mvarMap (\x -> return $ (markFailed x now, ()))
   modifyMVar mvarMap (\x -> do
-                         putStrLn $ show x
+                         let hostmap = Prelude.map (\y ->
+                                                     ((hostName y), (getStatus y))) $ elems x
+                         putStrLn $ show hostmap
                          return (x, ()))
+  memmap <- readMVar mvarMap
+  sendGossip host join memmap port
   return ()
   
 getCrucial :: (Get_C a) => ConfigParser -> String -> String -> a
@@ -84,3 +94,13 @@ getCrucial cp section key =
     case val of
       Left err -> error $ "Failed to get value from config: " ++ err
       Right v -> v
+
+sendGossip :: HostName -> Time -> Map ID Node -> PortID -> IO ()
+sendGossip myhost join memmap port = do
+  let othermem = Map.delete (makeID myhost join) memmap 
+      hosts = Prelude.map (\x -> hostName x) $ elems othermem
+      count = length hosts
+  x <- sequence $ replicate (ceiling $ (fromIntegral count) / 2) $ randomRIO (0, (count - 1))
+  putStrLn $ show x
+  sequence $ Prelude.map (\y -> try $ Network.sendTo (hosts !! y) port $ show memmap :: IO (Either SomeException ())) x
+  putStrLn $ "Sent to hosts" ++ (show $ Prelude.map (\y -> hosts !! y) x)
