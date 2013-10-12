@@ -4,67 +4,70 @@ import Network
 import System.IO
 import Data.Map as Map
 
-rendezvous = "192.168.1.200"
-
-defaultPort = PortNumber 8080
-
 type ID = String
-type HeartbeatCount = Int
 type Time = Integer
 
 data Status = Dead | Alive deriving (Show, Read, Eq, Ord)
 
-data Node = Node { getHostName :: HostName,
-                   getHeartBeats :: HeartbeatCount,
-                   getTime :: Time,
+data Node = Node { hostName :: HostName,
+                   joinTime :: Time,
+                   heartBeats :: Integer,
+                   updateTime :: Time,
                    getStatus :: Status } deriving (Show, Read)
 
 instance Eq Node where
-  (Node hosta _ timea _) == (Node hostb _ timeb _) = (hosta == hostb) && (timea == timeb)
+  (Node hosta joina _ _ _) == (Node hostb joinb _ _ _) = (hosta == hostb) && (joina == joinb)
   
 instance Ord Node where
-  (Node hosta _ timea _) < (Node hostb _ timeb _)
-    | hosta == hostb = timea < timeb
+  (Node hosta joina _ _ _) < (Node hostb joinb _ _ _)
+    | hosta == hostb = joina < joinb
     | otherwise = hosta < hostb
-  (Node hosta _ timea _) > (Node hostb _ timeb _)
-    | hosta == hostb = timea > timeb
+  (Node hosta joina _ _ _) > (Node hostb joinb _ _ _)
+    | hosta == hostb = joina > joinb
     | otherwise = hosta > hostb
   nodea >= nodeb = (nodea > nodeb) || (nodea == nodeb)
   nodea <= nodeb = (nodea < nodeb) || (nodea == nodeb)
 
-merge :: Map ID Node -> Map ID Node -> Map ID Node
-merge current new = Map.fold newest (difference current new) new
-  where newest node@(Node host heartbeat time status) acc =
+merge :: Map ID Node -> Map ID Node -> Time -> Map ID Node
+merge current new time = Map.fold (newest time) (difference current new) new
+  where newest newTime node@(Node host join heartbeat time status) acc =
           case (Map.lookup (getID node) current) of
-            Nothing -> insert (getHostName node) node acc
-            Just currentNode -> if (getHeartBeats currentNode) < (getHeartBeats node)
-                                then insert (getID node) node acc
-                                else insert (getID currentNode) currentNode acc
+            Nothing -> insert (getID node) (Node host join heartbeat newTime status) acc
+            Just currentNode@(Node _ _ currheartbeat currtime currstatus) ->
+              if (heartBeats currentNode) < (heartBeats node)
+              then insert (getID node) (Node host join heartbeat newTime status) acc
+              else insert (getID currentNode) (Node host join currheartbeat currtime currstatus) acc
+
+updateTimes :: Time -> Map ID Node -> Map ID Node
+updateTimes time members = Map.map (\(Node host join hb last status) -> Node host join hb time status) members
 
 getID :: Node -> ID
-getID node = makeID (getHostName node) (getTime node)
+getID node = makeID (hostName node) (joinTime node)
 
 makeID :: HostName -> Time -> ID
 makeID hostname time = hostname ++ "|" ++ (show time)
 
-sendList :: Map ID Node -> Node -> IO()
-sendList map node = sendTo (getHostName node) defaultPort (show $ toList map)
+sendList :: Map ID Node -> Node -> PortID -> IO()
+sendList memmap node port = sendTo (hostName node) port (show $ toList memmap)
 
-updateMe :: Map ID Node -> HostName -> Time -> Map ID Node
-updateMe map hostname time =
+updateMe :: Map ID Node -> HostName -> Time -> Time -> Map ID Node
+updateMe memmap hostname time nowTime =
     let identifier = makeID hostname time in
-    case Map.lookup identifier map of
-      Nothing -> 
-          insert identifier (Node hostname 1 time Alive) map
-      Just (Node _ heartbeats _ _) -> 
-          insert identifier (Node hostname (heartbeats + 1) time Alive) map
+    case (Map.lookup identifier memmap) of
+      Nothing -> insert identifier (Node hostname time 1 nowTime Alive) memmap
+      Just (Node _ _ heartbeats _ _) ->
+        insert identifier (Node hostname time (heartbeats + 1) nowTime Alive) memmap
 
-
-
-
-xNode = Node "192.168.1.200" 1 123 Alive
-yNode = Node "192.168.1.200" 2 123 Alive
-zNode = Node "192.168.1.201" 1 156 Alive
+markFailed :: Map ID Node -> Time -> Map ID Node
+markFailed memmap nowTime = Map.map setFailed memmap
+  where setFailed (Node host join heartBeat time status)
+          | (time + 5) < nowTime = (Node host join heartBeat time Dead)
+          | otherwise = (Node host join heartBeat time status)
+                   
+                   
+xNode = Node "192.168.1.200" 1 100 12 Alive
+yNode = Node "192.168.1.200" 2 123 13 Alive
+zNode = Node "192.168.1.201" 1 156 31 Alive
 
 x = singleton (getID xNode) xNode
 y = singleton (getID yNode) yNode
