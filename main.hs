@@ -56,7 +56,6 @@ handleAccepted handle mvarMap = do
       modifyMVar mvarMap (\x -> return $ (Gossip.merge x nodemap time, ()))
     _ -> putStrLn "Failed to parse message."
   hClose handle
-  putStrLn $ "\"" ++ gotmap ++ "\""
   
 getConfigOrFail :: IO (ConfigParser)
 getConfigOrFail = do
