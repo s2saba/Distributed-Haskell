@@ -91,7 +91,7 @@ doUpdate config host join port mvarMap = do
                          return (x, ()))
   memmap <- readMVar mvarMap
   if size memmap <= 1 then
-    sendJoin config port
+    sendJoin host config port mvarMap
   else
     sendGossip host join memmap port
   return ()
@@ -103,8 +103,8 @@ getCrucial cp section key =
       Left err -> error $ "Failed to get value from config: " ++ err
       Right v -> v
 
-sendJoin :: ConfigParser -> PortID -> IO ()
-sendJoin config port = do
+sendJoin :: HostName -> ConfigParser -> PortID -> MVar (Map ID Node) -> IO ()
+sendJoin host config port memMVar = do
   let val = getValue config "gossip" "contactip" in
     case val of
       Left err -> return ()
