@@ -277,7 +277,7 @@ portFromWord word = PortNumber $ fromIntegral word
 
 trySend :: HostName -> PortID -> ID -> String -> IO ()
 trySend host port (ID myHost myPort _) string = do
-  try $ do
+  (try $ do
     localAddr <- sockAddrFromHostAndPort myHost $ portFromWord 0
     remoteAddr <- sockAddrFromHostAndPort host port
     socket <- socketFromHostProtocolAndType host "tcp" Stream
