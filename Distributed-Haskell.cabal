@@ -22,7 +22,7 @@ synopsis:            A library aiming at providing simple distributed-systems co
 homepage:            github.com/knusbaum/Distributed-Haskell
 
 -- The license under which the package is released.
-license:             Apache-2.0
+license:             BSD3
 
 -- The file containing the license text.
 license-file:        LICENSE
@@ -44,6 +44,7 @@ build-type:          Simple
 -- Constraint on the version of Cabal needed to build this package.
 cabal-version:       >=1.8
 
+extra-source-files: LICENSE
 
 library
   -- Modules exported by the library.
