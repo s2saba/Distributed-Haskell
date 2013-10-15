@@ -168,9 +168,8 @@ sendJoin (ID host port _) myId (PortNumber myPort) = trySend host (portFromWord 
 listenForGossip :: MVar Bool -> MVar ID -> String -> MVar (Map ID Node) -> IO ()
 listenForGossip alive myIDMVar v6interface memberMVar = do
   (ID host port _) <- readMVar myIDMVar
-  putStrLn $ "Binding to " ++ host ++ v6interface
   sock <- listenSocket (host ++ v6interface) (portFromWord port)
-  putStrLn $ "Listening on " ++ host ++ ":" ++ (show port)
+  putStrLn $ "Listening on " ++ host ++ v6interface ++ ":" ++ (show port)
   setSocketOption sock ReuseAddr 1
   waitForConnect sock myIDMVar memberMVar
   putMVar alive False
@@ -269,7 +268,6 @@ acceptSocket sock = do
         (SockAddrInet6 port _ addr _) -> ((SockAddrInet6 port 0 addr 0), port)
         
   (Just host, Nothing) <- getNameInfo [NI_NUMERICHOST] True False sockAddr
-  putStrLn $ "Got host: " ++ host
   handle <- socketToHandle acceptedSocket ReadMode 
   return (handle, host, port)
 
@@ -279,16 +277,14 @@ portFromWord word = PortNumber $ fromIntegral word
 
 trySend :: HostName -> PortID -> ID -> String -> IO ()
 trySend host port (ID myHost myPort _) string = do
-
-  localAddr <- sockAddrFromHostAndPort myHost $ portFromWord 0
-  remoteAddr <- sockAddrFromHostAndPort host port
-  socket <- socketFromHostProtocolAndType host "tcp" Stream
-  putStrLn $ "Local: " ++ (show localAddr)
-  putStrLn $ "Remote: " ++ (show remoteAddr)
-  bindSocket socket localAddr    
-  connect socket remoteAddr
-  send socket string
-  Network.Socket.sClose socket
+  try $ do
+    localAddr <- sockAddrFromHostAndPort myHost $ portFromWord 0
+    remoteAddr <- sockAddrFromHostAndPort host port
+    socket <- socketFromHostProtocolAndType host "tcp" Stream
+    bindSocket socket localAddr    
+    connect socket remoteAddr
+    send socket string
+    Network.Socket.sClose socket) :: IO (Either SomeException ())
   return ()   
   
 --  try $ Network.sendTo host port string :: IO (Either SomeException ())
