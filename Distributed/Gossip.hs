@@ -166,7 +166,7 @@ listenForGossip :: MVar Bool -> MVar ID -> MVar (Map ID Node) -> IO ()
 listenForGossip alive myIDMVar memberMVar = do
   (ID host port _) <- readMVar myIDMVar
   sock <- listenSocket host (portFromWord port)
-  putStrLn $ "Listening on port " ++ (show port)
+  putStrLn $ "Listening on " ++ host ++ ":" ++ (show port)
   setSocketOption sock ReuseAddr 1
   waitForConnect sock myIDMVar memberMVar
   putMVar alive False
@@ -272,13 +272,13 @@ portFromWord word = PortNumber $ fromIntegral word
 trySend :: HostName -> PortID -> ID -> String -> IO ()
 trySend host port (ID myHost myPort _) string = do
   (try $ do
-    localAddr <- sockAddrFromHostAndPort myHost $ portFromWord myPort
-    remoteAddr <- sockAddrFromHostAndPort host port
-    socket <- socketFromHostProtocolAndType host "tcp" Stream
-    bindSocket socket localAddr    
-    connect socket remoteAddr
-    send socket string
-    Network.Socket.sClose socket) :: IO (Either SomeException ())
+      localAddr <- sockAddrFromHostAndPort myHost $ portFromWord 0
+      remoteAddr <- sockAddrFromHostAndPort host port
+      socket <- socketFromHostProtocolAndType host "tcp" Stream
+      bindSocket socket localAddr    
+      connect socket remoteAddr
+      send socket string
+      Network.Socket.sClose socket) :: IO (Either SomeException ())
   return ()   
   
 --  try $ Network.sendTo host port string :: IO (Either SomeException ())
