@@ -57,17 +57,17 @@ instance Ord Node where
 gossipMerge :: Map ID Node -> Map ID Node -> Time -> Map ID Node
 gossipMerge current new now = Map.fold (newest now) (difference current new) new
   where newest newTime node@(Node host port join heartbeat time status) acc =
-          case (Map.lookup (getID node) current) of
+          case Map.lookup (getID node) current of
             Nothing -> insert (getID node) (Node host port join heartbeat newTime status) acc
             Just currentNode@(Node _ _ _ currheartbeat currtime currstatus) ->
-              if (heartBeats currentNode) < (heartBeats node)
+              if heartBeats currentNode < heartBeats node
               then insert (getID node) (Node host port join heartbeat newTime status) acc
               else insert (getID currentNode) (Node host port join currheartbeat currtime currstatus) acc
 
 -- Update a particular node's updateTime.
 updateNode :: Map ID Node -> ID -> Time -> Map ID Node
 updateNode memmap id@(ID host port time) nowTime =
-    case (Map.lookup id memmap) of
+    case Map.lookup id memmap of
       Nothing -> insert id (Node host port time 1 nowTime Alive) memmap
       Just (Node _ _ _ heartbeats _ _) ->
         insert id (Node host port time (heartbeats + 1) nowTime Alive) memmap
@@ -95,11 +95,11 @@ findLiveAnytime members (ID idHost idPort _) = Map.foldl findAlive Nothing membe
 
 -- Pretty print the membership list for human consumption
 prettyMemberList :: Map ID Node -> [String]
-prettyMemberList members = Prelude.map (\x -> show $ (hostName x, hostPort x, joinTime x, heartBeats x, getStatus x)) $ elems members
+prettyMemberList members = Prelude.map (\x -> show (hostName x, hostPort x, joinTime x, heartBeats x, getStatus x)) $ elems members
 
 -- Return a map containing only the living nodes in our map.
 filterDead :: Map ID Node -> Map ID Node
-filterDead members = Map.filter (\x -> (getStatus x) == Alive) members
+filterDead = Map.filter (\x -> getStatus x == Alive)
 
 -- Create an ID for a node.
 getID :: Node -> ID

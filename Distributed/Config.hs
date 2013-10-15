@@ -16,7 +16,7 @@ getConfig filePath = do
         return (Just cp)
         
 -- We don't care why we cant read the config. Either give it up, or fail.
-getConfigOrFail :: FilePath -> IO (ConfigParser)
+getConfigOrFail :: FilePath -> IO ConfigParser
 getConfigOrFail filePath = do
   config <- getConfig filePath
   case config of 
@@ -35,7 +35,7 @@ getValue cp section key = let x = get cp section key in
 -- Fail if we can't get the value.
 configGetCrucial :: (Get_C a) => ConfigParser -> String -> String -> a
 configGetCrucial cp section key = 
-  let val = (getValue cp section key) in
+  let val = getValue cp section key in
   case val of
     Left err -> error $ "Failed to get value from config: " ++ err
     Right v -> v
@@ -44,7 +44,7 @@ configGetCrucial cp section key =
 -- Just return it, or return Nothing.
 configGetValue :: (Get_C a) => ConfigParser -> String -> String -> Maybe a
 configGetValue cp section key = 
-  let val = (getValue cp section key) in
+  let val = getValue cp section key in
   case val of
     Left err -> Nothing
     Right v -> Just v

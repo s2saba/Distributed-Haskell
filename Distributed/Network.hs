@@ -18,9 +18,9 @@ listenSocket :: HostName -> PortID -> IO Socket
 listenSocket host (PortNumber port) = do
   infos <- getAddrInfo Nothing (Just host) Nothing
   let info = head infos
-      sockAddr = case (addrAddress info) of
-        (SockAddrInet _ addr) -> (SockAddrInet port addr)
-        (SockAddrInet6 _ _ addr scope) -> (SockAddrInet6 port 0 addr scope)
+      sockAddr = case addrAddress info of
+        (SockAddrInet _ addr) -> SockAddrInet port addr
+        (SockAddrInet6 _ _ addr scope) -> SockAddrInet6 port 0 addr scope
         
   proto <- getProtocolNumber "tcp"
   sock <- socket (addrFamily info) Stream proto
@@ -35,8 +35,8 @@ acceptSocket :: Socket -> IO (Handle, HostName, PortNumber)
 acceptSocket sock = do
   (acceptedSocket, address) <- Network.Socket.accept sock
   let (sockAddr, port) = case address of
-        (SockAddrInet port addr) -> ((SockAddrInet port addr), port)
-        (SockAddrInet6 port _ addr _) -> ((SockAddrInet6 port 0 addr 0), port)
+        (SockAddrInet port addr) -> (SockAddrInet port addr, port)
+        (SockAddrInet6 port _ addr _) -> (SockAddrInet6 port 0 addr 0, port)
         
   (Just host, Nothing) <- getNameInfo [NI_NUMERICHOST] True False sockAddr
   handle <- socketToHandle acceptedSocket ReadMode 
@@ -75,8 +75,8 @@ sockAddrFromHostAndPort :: HostName -> PortID -> IO SockAddr
 sockAddrFromHostAndPort host (PortNumber port) = do
   infos <- getAddrInfo Nothing (Just host) Nothing
   let info = head infos
-      sockAddr = case (addrAddress info) of
-        (SockAddrInet _ addr) -> (SockAddrInet port addr)
-        (SockAddrInet6 _ _ addr scope) -> (SockAddrInet6 port 0 addr scope)
+      sockAddr = case addrAddress info of
+        (SockAddrInet _ addr) -> SockAddrInet port addr
+        (SockAddrInet6 _ _ addr scope) -> SockAddrInet6 port 0 addr scope
         
   return sockAddr  

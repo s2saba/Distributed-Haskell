@@ -17,6 +17,8 @@ import Data.String.Utils                 -- strip
 import Control.Concurrent.Timer          --repeatedTimer
 import Control.Concurrent.Suspend.Lifted -- sDelay
 import Data.Map as Map
+import Control.Monad (when, replicateM)
+import Control.Arrow ((&&&))
 
 -- A function that's run periodically. It updates our node (if we're in the membership map),
 -- marks the failed nodes, and sends out gossip.
@@ -28,14 +30,13 @@ doUpdate contact tFail myIdMVar v6interface mvarMap = do
   (TOD now _) <- getClockTime
   id@(ID myHost myPort myTime) <- readMVar myIdMVar
 
-  let idInterface = (ID (myHost ++ v6interface) myPort myTime)
-  
-  if myTime /= 0 then
-    modifyMVar mvarMap (\x -> return $ (updateNode x id now, ()))       -- Heartbeat our own list
-  else
-    return ()
+  let idInterface = ID (myHost ++ v6interface) myPort myTime
 
-  modifyMVar mvarMap (\x -> return $ (markFailed x now tFail, ()))      -- Mark dead nodes
+  -- Heartbeat our own list
+  when (myTime /= 0) (modifyMVar mvarMap (\x -> return (updateNode x id now, ())))
+
+  -- Mark dead nodes
+  modifyMVar mvarMap (\x -> return (markFailed x now tFail, ()))      
 
   memberMap <- readMVar mvarMap
   case contact of
@@ -50,28 +51,29 @@ doUpdate contact tFail myIdMVar v6interface mvarMap = do
 
   id <- readMVar myIdMVar
   sendGossip memberMap id v6interface
-  putStrLn $ "Members: " ++ (show now) ++ " | " ++ (show $ prettyMemberList memberMap)   -- Print membership
+  -- Print membership
+  putStrLn $ "Members: " ++ show now ++ " | " ++ show (prettyMemberList memberMap)
 
 -- Multicast our membership map in gossip style. We only broadcast to nodes that aren't us,
 -- and we only send nodes marked alive.
 sendGossip :: Map ID Node -> ID -> String -> IO()
 sendGossip members myId@(ID myHost myPort myTime) v6interface = do
-  let myV6Id = (ID (myHost ++ v6interface) myPort myTime)
+  let myV6Id = ID (myHost ++ v6interface) myPort myTime
       otherMembers = Map.delete myId members
       notDead = filterDead members
-      hosts = Prelude.map (\x -> (host x, port x)) $ keys otherMembers
+      hosts = Prelude.map (host &&& port) $ keys otherMembers
       count = length hosts
-      numToSend = ceiling $ (fromIntegral count) / 2
+      numToSend = ceiling $ fromIntegral count / 2
 
-  chosenHosts <- sequence $ replicate numToSend $ randomRIO (0, (count - 1))
-  sequence $ Prelude.map (\y -> let host = fst $ hosts !! y
-                                    port = portFromWord $ snd $ hosts !! y in
-                                forkIO $ trySend host port myV6Id $ show notDead) $ nub chosenHosts
+  chosenHosts <- replicateM numToSend $ randomRIO (0, count - 1)
+  mapM_ (\y -> let host = fst $ hosts !! y
+                   port = portFromWord $ snd $ hosts !! y in
+              forkIO $ trySend host port myV6Id $ show notDead) $ nub chosenHosts
   return ()
 
 -- Send a join message to the contact
 sendJoin :: ID -> ID -> PortID -> IO ()
-sendJoin (ID host port _) myId (PortNumber myPort) = trySend host (portFromWord port) myId $ "Join " ++ (show myPort)
+sendJoin (ID host port _) myId (PortNumber myPort) = trySend host (portFromWord port) myId $ "Join " ++ show myPort
 
 -- Begin listening for gossip. On unhandled exception, set the MVar so someone who cares can
 -- learn about the failure.
@@ -80,7 +82,7 @@ listenForGossip :: MVar Bool -> MVar ID -> String -> MVar (Map ID Node) -> IO ()
 listenForGossip alive myIDMVar v6interface memberMVar = do
   (ID host port _) <- readMVar myIDMVar
   sock <- listenSocket (host ++ v6interface) (portFromWord port)
-  putStrLn $ "Listening on " ++ host ++ v6interface ++ ":" ++ (show port)
+  putStrLn $ "Listening on " ++ host ++ v6interface ++ ":" ++ show port
   waitForConnect sock myIDMVar memberMVar
   putMVar alive False
 
@@ -102,19 +104,18 @@ handleConnection (handle, host, port) myIDMVar memberMVar = do
   let strippedmsg = strip message
   case stripPrefix "Join " strippedmsg of
     Just portStr ->
-      modifyMVar memberMVar (\x -> return $ (updateNode x (ID host (fromIntegral $ read portStr) time) time, ()))
+      modifyMVar memberMVar (\x -> return (updateNode x (ID host (fromIntegral $ read portStr) time) time, ()))
     Nothing -> 
-      case reads $ strippedmsg of
+      case reads strippedmsg of
         [(nodemap,"")] -> do
-          modifyMVar memberMVar (\x -> return $ (gossipMerge x nodemap time, ()))
+          modifyMVar memberMVar (\x -> return (gossipMerge x nodemap time, ()))
           memberMap <- readMVar memberMVar
           myId <- readMVar myIDMVar
           let myNode = findLiveAnytime memberMap myId
           case myNode of
             Nothing -> return ()
-            Just (Node host port time _ _ _) -> modifyMVar myIDMVar (\x -> return $ ((ID host port time), ()))
-        _ -> do
-          putStrLn $ "Failed to parse message from " ++ host ++ ":" ++ (show port)
+            Just (Node host port time _ _ _) -> modifyMVar myIDMVar (\x -> return (ID host port time, ()))
+        _ -> putStrLn $ "Failed to parse message from " ++ host ++ ":" ++ show port
 
   hClose handle
   
@@ -130,7 +131,7 @@ runGossip filePath = do
       contactIP = configGetValue config "gossip" "contactip"
       ipv6Interface = case configGetValue config "gossip" "ipv6_interface" of
         Nothing -> ""
-        Just interface -> "%" ++ interface
+        Just interface -> '%':interface
       bindIP = configGetCrucial config "gossip" "bindip"
       bindPort = configGetCrucial config "gossip" "bindport"
       tFail = configGetCrucial config "gossip" "tfail"
