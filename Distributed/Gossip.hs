@@ -252,7 +252,7 @@ listenSocket host (PortNumber port) = do
   let info = head infos
       hostAddr = case (addrAddress info) of
         (SockAddrInet _ addr) -> addr
-        (SockAddrInet6 _ addr _ _) -> addr
+        (SockAddrInet6 _ _ addr _) -> addr
         
   putStrLn $ show hostAddr
   proto <- getProtocolNumber "tcp"
