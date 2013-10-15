@@ -131,19 +131,20 @@ doUpdate contact tFail myIdMVar mvarMap = do
   memberMap <- readMVar mvarMap
   case contact of
     Nothing -> return ()
-    Just contactId -> case findLiveAnytime memberMap contactId of
-      Nothing -> sendJoin contactId $ portFromWord myPort
-      Just node -> do
-        putStrLn $ "Contacting " ++ (show node)
-        return ()
-        
+    Just contactId -> do
+       case findLiveAnytime memberMap contactId of
+         Nothing -> sendJoin contactId $ portFromWord myPort
+         Just node -> return ()
+       case findLiveAnytime memberMap id of
+         Nothing -> sendJoin contactId $ portFromWord myPort
+         Just node -> return ()
+
   id <- readMVar myIdMVar
   sendGossip memberMap id
   putStrLn $ "Members: " ++ (show $ prettyMemberList memberMap)                    -- Print membership
 
 sendGossip :: Map ID Node -> ID -> IO()
 sendGossip members myId = do
-  putStrLn $ "Me: " ++ (show myId)
   let otherMembers = Map.delete myId members
       notDead = filterDead members
       hosts = Prelude.map (\x -> (host x, port x)) $ keys otherMembers
@@ -154,7 +155,6 @@ sendGossip members myId = do
   sequence $ Prelude.map (\y -> let host = fst $ hosts !! y
                                     port = portFromWord $ snd $ hosts !! y in
                                 forkIO $ trySend host port $ show notDead) $ nub chosenHosts
-  putStrLn $ show $ Prelude.map (\y -> fst $ hosts !! y) $ nub chosenHosts
   return ()
 
 sendJoin :: ID -> PortID -> IO ()
@@ -200,7 +200,6 @@ handleConnection (handle, host, port) myIDMVar memberMVar = do
           memberMap <- readMVar memberMVar
           myId <- readMVar myIDMVar
           let myNode = findLiveAnytime memberMap myId
-          putStrLn $ show myNode
           case myNode of
             Nothing -> return ()
             Just (Node host port time _ _ _) -> modifyMVar myIDMVar (\x -> return $ ((ID host port time), ()))
