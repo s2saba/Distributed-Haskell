@@ -142,7 +142,7 @@ doUpdate contact tFail myIdMVar mvarMap = do
 
   id <- readMVar myIdMVar
   sendGossip memberMap id
-  putStrLn $ "Members: " ++ (show $ prettyMemberList memberMap)                    -- Print membership
+  putStrLn $ "Members: " ++ (show now) ++ " | " ++ (show $ prettyMemberList memberMap)                    -- Print membership
 
 sendGossip :: Map ID Node -> ID -> IO()
 sendGossip members myId = do
@@ -210,7 +210,8 @@ runGossip filePath = do
       bindIP = configGetCrucial config "gossip" "bindip"
       bindPort = configGetCrucial config "gossip" "bindport"
       tFail = configGetCrucial config "gossip" "tfail"
-
+      tGossip = configGetCrucial config "gossip" "tgossip"
+      
   (contact, myIdMVar) <-
     case (contactIP, contactPort) of
       (Just ip, Just port) -> do
@@ -229,7 +230,8 @@ runGossip filePath = do
   alive <- newEmptyMVar
 
   listener <- forkIO $ listenForGossip alive myIdMVar memberMVar
-  tmr <- repeatedTimer (doUpdate contact tFail myIdMVar memberMVar) $ sDelay 1
+  tmr <- repeatedTimer (doUpdate contact tFail myIdMVar memberMVar) $ sDelay tGossip
+
   return (listener, tmr, alive)
 
 stopGossip :: (ThreadId, TimerIO, MVar Bool) -> IO ()
