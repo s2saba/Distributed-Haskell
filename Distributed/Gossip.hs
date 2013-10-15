@@ -119,17 +119,27 @@ filterDead members = Map.filter (\x -> (getStatus x) == Alive) members
 doUpdate :: Maybe ID -> Time -> MVar ID -> MVar (Map ID Node) -> IO()
 doUpdate contact tFail myIdMVar mvarMap = do
   (TOD now _) <- getClockTime
-  myId <- readMVar myIdMVar
-  modifyMVar mvarMap (\x -> return $ (updateNode x myId now, ())) -- Heartbeat our own list
+  id@(ID myHost myPort myTime) <- readMVar myIdMVar
+  
+  if myTime /= 0 then
+    modifyMVar mvarMap (\x -> return $ (updateNode x id now, ())) -- Heartbeat our own list
+  else
+    return ()
+
   modifyMVar mvarMap (\x -> return $ (markFailed x now tFail, ()))      -- Mark dead nodes
+
   memberMap <- readMVar mvarMap
   case contact of
     Nothing -> return ()
-    Just id -> case findLiveAnytime memberMap id of
-      Nothing -> sendJoin id
-      Just _ -> return ()
-  sendGossip (Map.delete myId memberMap) myId
-  putStrLn $ show $ prettyMemberList memberMap                    -- Print membership
+    Just contactId -> case findLiveAnytime memberMap contactId of
+      Nothing -> sendJoin contactId
+      Just node -> do
+        putStrLn $ "Contacting " ++ (show node)
+        return ()
+        
+  id <- readMVar myIdMVar
+  sendGossip memberMap id
+  putStrLn $ "Members: " ++ (show $ prettyMemberList memberMap)                    -- Print membership
 
 sendGossip :: Map ID Node -> ID -> IO()
 sendGossip members myId = do
@@ -143,6 +153,7 @@ sendGossip members myId = do
   sequence $ Prelude.map (\y -> let host = fst $ hosts !! y
                                     port = portFromWord $ snd $ hosts !! y in
                                 forkIO $ trySend host port $ show notDead) $ nub chosenHosts
+  putStrLn $ show $ Prelude.map (\y -> fst $ hosts !! y) $ nub chosenHosts
   return ()
 
 sendJoin :: ID -> IO ()
@@ -158,23 +169,23 @@ trySend host port string = do
   return ()
 
 
-listenForGossip :: MVar Bool -> MVar (Map ID Node) -> PortID -> IO ()
-listenForGossip alive memberMVar listenPort = do
+listenForGossip :: MVar Bool -> MVar ID -> MVar (Map ID Node) -> PortID -> IO ()
+listenForGossip alive myIDMVar memberMVar listenPort = do
   sock <- listenOn listenPort
   putStrLn $ "Listening on port " ++ (show listenPort)
   setSocketOption sock ReuseAddr 1
-  waitForConnect sock memberMVar
+  waitForConnect sock myIDMVar memberMVar
   putMVar alive False
 
   
-waitForConnect :: Socket -> MVar (Map ID Node) -> IO ()
-waitForConnect sock mvarMap = do
+waitForConnect :: Socket -> MVar ID -> MVar (Map ID Node) -> IO ()
+waitForConnect sock myIDMVar mvarMap = do
   connection <- Network.accept sock
-  forkIO $ handleConnection connection mvarMap
-  waitForConnect sock mvarMap
+  forkIO $ handleConnection connection myIDMVar mvarMap
+  waitForConnect sock myIDMVar mvarMap
 
-handleConnection :: (Handle, HostName, PortNumber) -> MVar (Map ID Node) -> IO ()
-handleConnection (handle, host, port) memberMVar = do
+handleConnection :: (Handle, HostName, PortNumber) -> MVar ID -> MVar (Map ID Node) -> IO ()
+handleConnection (handle, host, port) myIDMVar memberMVar = do
   message <- hGetContents handle
   (TOD time _) <- getClockTime
   let strippedmsg = strip message
@@ -184,6 +195,12 @@ handleConnection (handle, host, port) memberMVar = do
     case reads $ strippedmsg of
       [(nodemap,"")] -> do
         modifyMVar memberMVar (\x -> return $ (gossipMerge x nodemap time, ()))
+        memberMap <- readMVar memberMVar
+        myId <- readMVar myIDMVar
+        let myNode = findLiveAnytime memberMap myId
+        case myNode of
+          Nothing -> return ()
+          Just (Node host port time _ _ _) -> modifyMVar myIDMVar (\x -> return $ ((ID host port time), ()))
       _ -> do
         putStrLn $ "Failed to parse message from " ++ host ++ ":" ++ (show port)
 
@@ -202,10 +219,12 @@ runGossip filePath = do
   (contact, myIdMVar) <-
     case (contactIP, contactPort) of
       (Just ip, Just port) -> do
+        putStrLn "This node is NOT the contact node."
         let contact = Just (ID ip port 0)
-        myIdMVar <- newEmptyMVar
+        myIdMVar <- newMVar (ID bindIP bindPort 0)
         return (contact, myIdMVar)
       (_, _) -> do
+        putStrLn "This node IS the contact node."
         (TOD now _) <- getClockTime 
         myIdMVar <- newMVar (ID bindIP bindPort now)
         return (Nothing, myIdMVar)
@@ -214,7 +233,7 @@ runGossip filePath = do
   memberMVar <- newMVar Map.empty
   alive <- newEmptyMVar
 
-  listener <- forkIO $ listenForGossip alive memberMVar $ PortNumber $ fromIntegral bindPort
+  listener <- forkIO $ listenForGossip alive myIdMVar memberMVar $ PortNumber $ fromIntegral bindPort
   tmr <- repeatedTimer (doUpdate contact tFail myIdMVar memberMVar) $ sDelay 1
   return (listener, tmr, alive)
 
