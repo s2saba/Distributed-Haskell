@@ -3,6 +3,7 @@ module Distributed.Gossip where
 import Distributed.Config
 import Network
 import Network.Socket                    -- setSocketOption, ReuseAddr
+import Network.BSD (getProtocolNumber)   -- getProtocolNumber
 import System.IO
 import Data.Word
 --import Data.List.Split
@@ -170,10 +171,11 @@ trySend host port string = do
   return ()
 
 
-listenForGossip :: MVar Bool -> MVar ID -> MVar (Map ID Node) -> PortID -> IO ()
-listenForGossip alive myIDMVar memberMVar listenPort = do
-  sock <- listenOn listenPort
-  putStrLn $ "Listening on port " ++ (show listenPort)
+listenForGossip :: MVar Bool -> MVar ID -> MVar (Map ID Node) -> IO ()
+listenForGossip alive myIDMVar memberMVar = do
+  (ID host port _) <- readMVar myIDMVar
+  sock <- listenSocket host (portFromWord port)
+  putStrLn $ "Listening on port " ++ (show port)
   setSocketOption sock ReuseAddr 1
   waitForConnect sock myIDMVar memberMVar
   putMVar alive False
@@ -181,7 +183,7 @@ listenForGossip alive myIDMVar memberMVar listenPort = do
   
 waitForConnect :: Socket -> MVar ID -> MVar (Map ID Node) -> IO ()
 waitForConnect sock myIDMVar mvarMap = do
-  connection <- Network.accept sock
+  connection <- acceptSocket sock
   forkIO $ handleConnection connection myIDMVar mvarMap
   waitForConnect sock myIDMVar mvarMap
 
@@ -236,11 +238,38 @@ runGossip filePath = do
   memberMVar <- newMVar Map.empty
   alive <- newEmptyMVar
 
-  listener <- forkIO $ listenForGossip alive myIdMVar memberMVar $ PortNumber $ fromIntegral bindPort
+  listener <- forkIO $ listenForGossip alive myIdMVar memberMVar
   tmr <- repeatedTimer (doUpdate contact tFail myIdMVar memberMVar) $ sDelay tGossip
+
   return (listener, tmr, alive)
 
 stopGossip :: (ThreadId, TimerIO, MVar Bool) -> IO ()
 stopGossip (listen, timer, _) = do
   killThread listen
   stopTimer timer
+
+listenSocket :: HostName -> PortID -> IO Socket
+listenSocket host (PortNumber port) = do
+  infos <- getAddrInfo Nothing (Just host) Nothing
+  let info = head infos
+      sockAddr = case (addrAddress info) of
+        (SockAddrInet _ addr) -> (SockAddrInet port addr)
+        (SockAddrInet6 _ _ addr scope) -> (SockAddrInet6 port 0 addr scope)
+        
+  proto <- getProtocolNumber "tcp"
+  sock <- socket (addrFamily info) Stream proto
+  setSocketOption sock ReuseAddr 1
+  bindSocket sock sockAddr
+  listen sock maxListenQueue
+  return sock
+
+acceptSocket :: Socket -> IO (Handle, HostName, PortNumber)
+acceptSocket sock = do
+  (acceptedSocket, address) <- Network.Socket.accept sock
+  let port = case address of
+        (SockAddrInet port _) -> port
+        (SockAddrInet6 port _ _ _) -> port
+        
+  (Just host, Nothing) <- getNameInfo [NI_NUMERICHOST] True False address
+  handle <- socketToHandle acceptedSocket ReadMode 
+  return (handle, host, port)
