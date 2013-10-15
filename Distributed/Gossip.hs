@@ -278,7 +278,7 @@ trySend host port (ID myHost myPort _) string = do
     bindSocket socket localAddr    
     connect socket remoteAddr
     send socket string
-    sClose socket) :: IO (Either SomeException ())
+    Network.Socket.sClose socket) :: IO (Either SomeException ())
   return ()   
   
 --  try $ Network.sendTo host port string :: IO (Either SomeException ())
