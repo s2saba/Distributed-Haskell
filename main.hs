@@ -93,8 +93,9 @@ doUpdate config host join port mvarMap = do
   if size memmap <= 1 then
     sendJoin host config port mvarMap
   else
-    sendGossip host join memmap port
-  return ()
+    do
+    forkIO $ sendGossip host join memmap port
+    return ()
   
 getCrucial :: (Get_C a) => ConfigParser -> String -> String -> a
 getCrucial cp section key = 
