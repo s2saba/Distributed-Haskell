@@ -3,7 +3,7 @@ module Distributed.Gossip where
 import Distributed.Config
 import Network
 import Network.Socket                    -- setSocketOption, ReuseAddr
-import Network.BSD (getProtocolNumber)   -- getProtocolNumber
+import Network.BSD (getProtocolNumber, ProtocolName)   -- getProtocolNumber
 import System.IO
 import Data.Word
 --import Data.List.Split
@@ -134,10 +134,10 @@ doUpdate contact tFail myIdMVar mvarMap = do
     Nothing -> return ()
     Just contactId -> do
        case findLiveAnytime memberMap contactId of
-         Nothing -> sendJoin contactId $ portFromWord myPort
+         Nothing -> sendJoin contactId id $ portFromWord myPort
          Just node -> return ()
        case findLiveAnytime memberMap id of
-         Nothing -> sendJoin contactId $ portFromWord myPort
+         Nothing -> sendJoin contactId id $ portFromWord myPort
          Just node -> return ()
 
   id <- readMVar myIdMVar
@@ -155,20 +155,11 @@ sendGossip members myId = do
   chosenHosts <- sequence $ replicate numToSend $ randomRIO (0, (count - 1))
   sequence $ Prelude.map (\y -> let host = fst $ hosts !! y
                                     port = portFromWord $ snd $ hosts !! y in
-                                forkIO $ trySend host port $ show notDead) $ nub chosenHosts
+                                forkIO $ trySend host port myId $ show notDead) $ nub chosenHosts
   return ()
 
-sendJoin :: ID -> PortID -> IO ()
-sendJoin (ID host port _) (PortNumber myPort) = trySend host (portFromWord port) $ "Join " ++ (show myPort)
-
-portFromWord :: Word16 -> PortID
-portFromWord word = PortNumber $ fromIntegral word
-
-
-trySend :: HostName -> PortID -> String -> IO ()
-trySend host port string = do
-  try $ Network.sendTo host port string :: IO (Either SomeException ())
-  return ()
+sendJoin :: ID -> ID -> PortID -> IO ()
+sendJoin (ID host port _) myId (PortNumber myPort) = trySend host (portFromWord port) myId $ "Join " ++ (show myPort)
 
 
 listenForGossip :: MVar Bool -> MVar ID -> MVar (Map ID Node) -> IO ()
@@ -271,3 +262,42 @@ acceptSocket sock = do
   (Just host, Nothing) <- getNameInfo [NI_NUMERICHOST] True False address
   handle <- socketToHandle acceptedSocket ReadMode 
   return (handle, host, port)
+
+portFromWord :: Word16 -> PortID
+portFromWord word = PortNumber $ fromIntegral word
+
+
+trySend :: HostName -> PortID -> ID -> String -> IO ()
+trySend host port (ID myHost myPort _) string = do
+  (try $ do
+    localAddr <- sockAddrFromHostAndPort myHost $ portFromWord myPort
+    remoteAddr <- sockAddrFromHostAndPort host port
+    socket <- socketFromHostProtocolAndType host "tcp" Stream
+    bindSocket socket localAddr    
+    connect socket remoteAddr
+    send socket string
+    sClose socket) :: IO (Either SomeException ())
+  return ()   
+  
+--  try $ Network.sendTo host port string :: IO (Either SomeException ())
+--  return ()
+
+
+socketFromHostProtocolAndType :: HostName -> ProtocolName -> SocketType -> IO Socket
+socketFromHostProtocolAndType host protocol sockType = do
+  infos <- getAddrInfo Nothing (Just host) Nothing
+  let info = head infos
+  proto <- getProtocolNumber protocol
+  sock <- socket (addrFamily info) sockType proto
+  setSocketOption sock ReuseAddr 1
+  return sock
+
+sockAddrFromHostAndPort :: HostName -> PortID -> IO SockAddr 
+sockAddrFromHostAndPort host (PortNumber port) = do
+  infos <- getAddrInfo Nothing (Just host) Nothing
+  let info = head infos
+      sockAddr = case (addrAddress info) of
+        (SockAddrInet _ addr) -> (SockAddrInet port addr)
+        (SockAddrInet6 _ _ addr scope) -> (SockAddrInet6 port 0 addr scope)
+        
+  return sockAddr  
