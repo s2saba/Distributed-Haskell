@@ -1,4 +1,4 @@
-import Distributed.Gossip as Gossip
+import Distributed.Gossip.IO as Gossip
 import Distributed.Config
 import Control.Concurrent
 
