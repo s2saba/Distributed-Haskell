@@ -13,6 +13,7 @@ import Data.Word                                          -- Word16
 import Control.Exception                                  -- try
 import Distributed.Gossip.Data
 
+-- Create a listenign socket that's bound to a particular hostname and port.
 listenSocket :: HostName -> PortID -> IO Socket
 listenSocket host (PortNumber port) = do
   infos <- getAddrInfo Nothing (Just host) Nothing
@@ -28,6 +29,8 @@ listenSocket host (PortNumber port) = do
   listen sock maxListenQueue
   return sock
 
+-- When we accept a connection, create an I/O handle along with hostname and port
+-- for the connected "client"
 acceptSocket :: Socket -> IO (Handle, HostName, PortNumber)
 acceptSocket sock = do
   (acceptedSocket, address) <- Network.Socket.accept sock
@@ -39,10 +42,12 @@ acceptSocket sock = do
   handle <- socketToHandle acceptedSocket ReadMode 
   return (handle, host, port)
 
+-- Commonly used since we store ports as Word16 in Node and ID types.
 portFromWord :: Word16 -> PortID
 portFromWord word = PortNumber $ fromIntegral word
 
-
+-- Attempt to send a message to a host on a socket bound to a particular hostname and port.
+-- Fail silently. (Because Gossip doesn't care really if it can gossip to a node or not)
 trySend :: HostName -> PortID -> ID -> String -> IO ()
 trySend host port (ID myHost myPort _) string = do
   (try $ do
@@ -55,6 +60,7 @@ trySend host port (ID myHost myPort _) string = do
     Network.Socket.sClose socket) :: IO (Either SomeException ())
   return ()
 
+-- Internal function to set up bound sockets
 socketFromHostProtocolAndType :: HostName -> ProtocolName -> SocketType -> IO Socket
 socketFromHostProtocolAndType host protocol sockType = do
   infos <- getAddrInfo Nothing (Just host) Nothing
@@ -64,6 +70,7 @@ socketFromHostProtocolAndType host protocol sockType = do
   setSocketOption sock ReuseAddr 1
   return sock
 
+-- Internal function to set up a sockAddr from a HostName and Port.
 sockAddrFromHostAndPort :: HostName -> PortID -> IO SockAddr 
 sockAddrFromHostAndPort host (PortNumber port) = do
   infos <- getAddrInfo Nothing (Just host) Nothing

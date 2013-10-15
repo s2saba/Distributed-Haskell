@@ -18,7 +18,11 @@ import Control.Concurrent.Timer          --repeatedTimer
 import Control.Concurrent.Suspend.Lifted -- sDelay
 import Data.Map as Map
 
-
+-- A function that's run periodically. It updates our node (if we're in the membership map),
+-- marks the failed nodes, and sends out gossip.
+-- It also tries to join the designated contact node if there is one in the case that:
+--       1) Our node isn't in the membership map
+--       2) The contact's node isn't in the membership map
 doUpdate :: Maybe ID -> Time -> MVar ID -> String -> MVar (Map ID Node) -> IO()
 doUpdate contact tFail myIdMVar v6interface mvarMap = do
   (TOD now _) <- getClockTime
@@ -27,7 +31,7 @@ doUpdate contact tFail myIdMVar v6interface mvarMap = do
   let idInterface = (ID (myHost ++ v6interface) myPort myTime)
   
   if myTime /= 0 then
-    modifyMVar mvarMap (\x -> return $ (updateNode x id now, ())) -- Heartbeat our own list
+    modifyMVar mvarMap (\x -> return $ (updateNode x id now, ()))       -- Heartbeat our own list
   else
     return ()
 
@@ -46,8 +50,10 @@ doUpdate contact tFail myIdMVar v6interface mvarMap = do
 
   id <- readMVar myIdMVar
   sendGossip memberMap id v6interface
-  putStrLn $ "Members: " ++ (show now) ++ " | " ++ (show $ prettyMemberList memberMap)                    -- Print membership
+  putStrLn $ "Members: " ++ (show now) ++ " | " ++ (show $ prettyMemberList memberMap)   -- Print membership
 
+-- Multicast our membership map in gossip style. We only broadcast to nodes that aren't us,
+-- and we only send nodes marked alive.
 sendGossip :: Map ID Node -> ID -> String -> IO()
 sendGossip members myId@(ID myHost myPort myTime) v6interface = do
   let myV6Id = (ID (myHost ++ v6interface) myPort myTime)
@@ -63,10 +69,13 @@ sendGossip members myId@(ID myHost myPort myTime) v6interface = do
                                 forkIO $ trySend host port myV6Id $ show notDead) $ nub chosenHosts
   return ()
 
+-- Send a join message to the contact
 sendJoin :: ID -> ID -> PortID -> IO ()
 sendJoin (ID host port _) myId (PortNumber myPort) = trySend host (portFromWord port) myId $ "Join " ++ (show myPort)
 
-
+-- Begin listening for gossip. On unhandled exception, set the MVar so someone who cares can
+-- learn about the failure.
+-- (This should probably be implemented better. I'd like to put an exception in the MVar.)
 listenForGossip :: MVar Bool -> MVar ID -> String -> MVar (Map ID Node) -> IO ()
 listenForGossip alive myIDMVar v6interface memberMVar = do
   (ID host port _) <- readMVar myIDMVar
@@ -75,13 +84,17 @@ listenForGossip alive myIDMVar v6interface memberMVar = do
   waitForConnect sock myIDMVar memberMVar
   putMVar alive False
 
-  
+-- Wait for and accept a connection, then fork the handler.
 waitForConnect :: Socket -> MVar ID -> MVar (Map ID Node) -> IO ()
 waitForConnect sock myIDMVar mvarMap = do
   connection <- acceptSocket sock
   forkIO $ handleConnection connection myIDMVar mvarMap
   waitForConnect sock myIDMVar mvarMap
 
+-- Handle a connection.
+-- The message is either a join, in which case we add the node to the membership map,
+-- or it's a membership map, and we merge our map with the received one.
+-- We also update our id MVar with the latest node representing us in the map.
 handleConnection :: (Handle, HostName, PortNumber) -> MVar ID -> MVar (Map ID Node) -> IO ()
 handleConnection (handle, host, port) myIDMVar memberMVar = do
   message <- hGetContents handle
@@ -105,7 +118,11 @@ handleConnection (handle, host, port) myIDMVar memberMVar = do
 
   hClose handle
   
-
+-- A function that accepts a config file path, reads the configuration, and begins gossiping
+-- based on that configuration. It currently returns the ThreadID of the listener, the
+-- TimerIO of the periodic update function, and the MVar that will be filled if the
+-- listener stops for some reason.
+-- TODO: If the listener stops, halt other portions of the gossip protocol
 runGossip :: FilePath -> IO (ThreadId, TimerIO, MVar Bool)
 runGossip filePath = do
   config <- getConfigOrFail filePath
@@ -141,6 +158,7 @@ runGossip filePath = do
 
   return (listener, tmr, alive)
 
+-- A function to stop the gossip protocol.
 stopGossip :: (ThreadId, TimerIO, MVar Bool) -> IO ()
 stopGossip (listen, timer, _) = do
   killThread listen
