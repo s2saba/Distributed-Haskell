@@ -250,15 +250,14 @@ listenSocket :: HostName -> PortID -> IO Socket
 listenSocket host (PortNumber port) = do
   infos <- getAddrInfo Nothing (Just host) Nothing
   let info = head infos
-      hostAddr = case (addrAddress info) of
-        (SockAddrInet _ addr) -> addr
-        (SockAddrInet6 _ _ addr _) -> addr
+      sockAddr = case (addrAddress info) of
+        (SockAddrInet _ addr) -> (SockAddrInet port addr)
+        (SockAddrInet6 _ _ addr scope) -> (SockAddrInet6 port 0 addr scope)
         
-  putStrLn $ show hostAddr
   proto <- getProtocolNumber "tcp"
   sock <- socket (addrFamily info) Stream proto
   setSocketOption sock ReuseAddr 1
-  bindSocket sock (SockAddrInet port hostAddr)
+  bindSocket sock sockAddr
   listen sock maxListenQueue
   return sock
 
