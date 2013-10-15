@@ -117,10 +117,12 @@ filterDead members = Map.filter (\x -> (getStatus x) == Alive) members
 
 --updateNode :: Map ID Node -> ID -> Time -> Map ID Node
 
-doUpdate :: Maybe ID -> Time -> MVar ID -> MVar (Map ID Node) -> IO()
-doUpdate contact tFail myIdMVar mvarMap = do
+doUpdate :: Maybe ID -> Time -> MVar ID -> String -> MVar (Map ID Node) -> IO()
+doUpdate contact tFail myIdMVar v6interface mvarMap = do
   (TOD now _) <- getClockTime
   id@(ID myHost myPort myTime) <- readMVar myIdMVar
+
+  let idInterface = (ID (myHost ++ v6interface) myPort myTime)
   
   if myTime /= 0 then
     modifyMVar mvarMap (\x -> return $ (updateNode x id now, ())) -- Heartbeat our own list
@@ -134,10 +136,10 @@ doUpdate contact tFail myIdMVar mvarMap = do
     Nothing -> return ()
     Just contactId -> do
        case findLiveAnytime memberMap contactId of
-         Nothing -> sendJoin contactId id $ portFromWord myPort
+         Nothing -> sendJoin contactId idInterface $ portFromWord myPort
          Just node -> return ()
        case findLiveAnytime memberMap id of
-         Nothing -> sendJoin contactId id $ portFromWord myPort
+         Nothing -> sendJoin contactId idInterface $ portFromWord myPort
          Just node -> return ()
 
   id <- readMVar myIdMVar
@@ -162,10 +164,11 @@ sendJoin :: ID -> ID -> PortID -> IO ()
 sendJoin (ID host port _) myId (PortNumber myPort) = trySend host (portFromWord port) myId $ "Join " ++ (show myPort)
 
 
-listenForGossip :: MVar Bool -> MVar ID -> MVar (Map ID Node) -> IO ()
-listenForGossip alive myIDMVar memberMVar = do
+listenForGossip :: MVar Bool -> MVar ID -> String -> MVar (Map ID Node) -> IO ()
+listenForGossip alive myIDMVar v6interface memberMVar = do
   (ID host port _) <- readMVar myIDMVar
-  sock <- listenSocket host (portFromWord port)
+  putStrLn $ "Binding to " ++ host ++ v6interface
+  sock <- listenSocket (host ++ v6interface) (portFromWord port)
   putStrLn $ "Listening on " ++ host ++ ":" ++ (show port)
   setSocketOption sock ReuseAddr 1
   waitForConnect sock myIDMVar memberMVar
@@ -207,6 +210,9 @@ runGossip filePath = do
   config <- getConfigOrFail filePath
   let contactPort = configGetValue config "gossip" "contactport"
       contactIP = configGetValue config "gossip" "contactip"
+      ipv6Interface = case configGetValue config "gossip" "ipv6_interface" of
+        Nothing -> ""
+        Just interface -> "%" ++ interface
       bindIP = configGetCrucial config "gossip" "bindip"
       bindPort = configGetCrucial config "gossip" "bindport"
       tFail = configGetCrucial config "gossip" "tfail"
@@ -229,8 +235,8 @@ runGossip filePath = do
   memberMVar <- newMVar Map.empty
   alive <- newEmptyMVar
 
-  listener <- forkIO $ listenForGossip alive myIdMVar memberMVar
-  tmr <- repeatedTimer (doUpdate contact tFail myIdMVar memberMVar) $ sDelay tGossip
+  listener <- forkIO $ listenForGossip alive myIdMVar ipv6Interface memberMVar
+  tmr <- repeatedTimer (doUpdate contact tFail myIdMVar ipv6Interface memberMVar) $ sDelay tGossip
 
   return (listener, tmr, alive)
 
@@ -257,11 +263,12 @@ listenSocket host (PortNumber port) = do
 acceptSocket :: Socket -> IO (Handle, HostName, PortNumber)
 acceptSocket sock = do
   (acceptedSocket, address) <- Network.Socket.accept sock
-  let port = case address of
-        (SockAddrInet port _) -> port
-        (SockAddrInet6 port _ _ _) -> port
+  let (sockAddr, port) = case address of
+        (SockAddrInet port addr) -> ((SockAddrInet port addr), port)
+        (SockAddrInet6 port _ addr _) -> ((SockAddrInet6 port 0 addr 0), port)
         
-  (Just host, Nothing) <- getNameInfo [NI_NUMERICHOST] True False address
+  (Just host, Nothing) <- getNameInfo [NI_NUMERICHOST] True False sockAddr
+  putStrLn $ "Got host: " ++ host
   handle <- socketToHandle acceptedSocket ReadMode 
   return (handle, host, port)
 
