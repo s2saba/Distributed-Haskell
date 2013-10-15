@@ -7,7 +7,7 @@ import System.IO
 import Data.Word
 --import Data.List.Split
 import Data.Map as Map
-import Data.List (nub)                   -- nub
+import Data.List (nub, stripPrefix)      -- nub, stripPrefix
 import System.Time                       -- getClockTime
 import Control.Concurrent                -- Mvars
 import System.Random                     -- randomRIO
@@ -132,7 +132,7 @@ doUpdate contact tFail myIdMVar mvarMap = do
   case contact of
     Nothing -> return ()
     Just contactId -> case findLiveAnytime memberMap contactId of
-      Nothing -> sendJoin contactId
+      Nothing -> sendJoin contactId $ portFromWord myPort
       Just node -> do
         putStrLn $ "Contacting " ++ (show node)
         return ()
@@ -143,6 +143,7 @@ doUpdate contact tFail myIdMVar mvarMap = do
 
 sendGossip :: Map ID Node -> ID -> IO()
 sendGossip members myId = do
+  putStrLn $ "Me: " ++ (show myId)
   let otherMembers = Map.delete myId members
       notDead = filterDead members
       hosts = Prelude.map (\x -> (host x, port x)) $ keys otherMembers
@@ -156,8 +157,8 @@ sendGossip members myId = do
   putStrLn $ show $ Prelude.map (\y -> fst $ hosts !! y) $ nub chosenHosts
   return ()
 
-sendJoin :: ID -> IO ()
-sendJoin (ID host port _) = trySend host (portFromWord port) "Join"
+sendJoin :: ID -> PortID -> IO ()
+sendJoin (ID host port _) myPort = trySend host (portFromWord port) $ "Join " ++ (show myPort)
 
 portFromWord :: Word16 -> PortID
 portFromWord word = PortNumber $ fromIntegral word
@@ -189,20 +190,22 @@ handleConnection (handle, host, port) myIDMVar memberMVar = do
   message <- hGetContents handle
   (TOD time _) <- getClockTime
   let strippedmsg = strip message
-  if strippedmsg == "Join" then
-    modifyMVar memberMVar (\x -> return $ (updateNode x (ID host (fromIntegral port) time) time, ()))
-  else
-    case reads $ strippedmsg of
-      [(nodemap,"")] -> do
-        modifyMVar memberMVar (\x -> return $ (gossipMerge x nodemap time, ()))
-        memberMap <- readMVar memberMVar
-        myId <- readMVar myIDMVar
-        let myNode = findLiveAnytime memberMap myId
-        case myNode of
-          Nothing -> return ()
-          Just (Node host port time _ _ _) -> modifyMVar myIDMVar (\x -> return $ ((ID host port time), ()))
-      _ -> do
-        putStrLn $ "Failed to parse message from " ++ host ++ ":" ++ (show port)
+  case stripPrefix "Join " strippedmsg of
+    Just portStr ->
+      modifyMVar memberMVar (\x -> return $ (updateNode x (ID host (fromIntegral $ read portStr) time) time, ()))
+    Nothing -> 
+      case reads $ strippedmsg of
+        [(nodemap,"")] -> do
+          modifyMVar memberMVar (\x -> return $ (gossipMerge x nodemap time, ()))
+          memberMap <- readMVar memberMVar
+          myId <- readMVar myIDMVar
+          let myNode = findLiveAnytime memberMap myId
+          putStrLn $ show myNode
+          case myNode of
+            Nothing -> return ()
+            Just (Node host port time _ _ _) -> modifyMVar myIDMVar (\x -> return $ ((ID host port time), ()))
+        _ -> do
+          putStrLn $ "Failed to parse message from " ++ host ++ ":" ++ (show port)
 
   hClose handle
   
