@@ -246,7 +246,11 @@ stopGossip (listen, timer, _) = do
 
 acceptSocket :: Socket -> IO (Handle, HostName, PortNumber)
 acceptSocket sock = do
-  (acceptedSocket, address@(SockAddrInet port _)) <- Network.Socket.accept sock
+  (acceptedSocket, address) <- Network.Socket.accept sock
+  let port = case address of
+        (SockAddrInet port _) -> port
+        (SockAddrInet6 port _ _ _) -> port
+        
   (Just host, Nothing) <- getNameInfo [NI_NUMERICHOST] True False address
   handle <- socketToHandle acceptedSocket ReadMode 
   return (handle, host, port)
