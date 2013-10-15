@@ -158,7 +158,7 @@ sendGossip members myId = do
   return ()
 
 sendJoin :: ID -> PortID -> IO ()
-sendJoin (ID host port _) myPort = trySend host (portFromWord port) $ "Join " ++ (show myPort)
+sendJoin (ID host port _) (PortNumber myPort) = trySend host (portFromWord port) $ "Join " ++ (show myPort)
 
 portFromWord :: Word16 -> PortID
 portFromWord word = PortNumber $ fromIntegral word
