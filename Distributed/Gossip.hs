@@ -181,7 +181,7 @@ listenForGossip alive myIDMVar memberMVar listenPort = do
   
 waitForConnect :: Socket -> MVar ID -> MVar (Map ID Node) -> IO ()
 waitForConnect sock myIDMVar mvarMap = do
-  connection <- Network.accept sock
+  connection <- acceptSocket sock
   forkIO $ handleConnection connection myIDMVar mvarMap
   waitForConnect sock myIDMVar mvarMap
 
@@ -243,3 +243,10 @@ stopGossip :: (ThreadId, TimerIO, MVar Bool) -> IO ()
 stopGossip (listen, timer, _) = do
   killThread listen
   stopTimer timer
+
+acceptSocket :: Socket -> IO (Handle, HostName, PortNumber)
+acceptSocket sock = do
+  (acceptedSocket, address@(SockAddrInet port _)) <- Network.Socket.accept sock
+  (Just host, Nothing) <- getNameInfo [NI_NUMERICHOST] True False address
+  handle <- socketToHandle acceptedSocket ReadMode 
+  return (handle, host, port)
