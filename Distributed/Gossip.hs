@@ -110,7 +110,7 @@ y = singleton (getID yNode) yNode
 z = singleton (getID zNode) zNode
 
 prettyMemberList :: Map ID Node -> [String]
-prettyMemberList members = Prelude.map (\x -> show $ (hostName x, hostPort x, joinTime x, getStatus x)) $ elems members
+prettyMemberList members = Prelude.map (\x -> show $ (hostName x, hostPort x, joinTime x, heartBeats x, getStatus x)) $ elems members
 
 filterDead :: Map ID Node -> Map ID Node
 filterDead members = Map.filter (\x -> (getStatus x) == Alive) members
@@ -143,12 +143,13 @@ doUpdate contact tFail myIdMVar v6interface mvarMap = do
          Just node -> return ()
 
   id <- readMVar myIdMVar
-  sendGossip memberMap id
+  sendGossip memberMap id v6interface
   putStrLn $ "Members: " ++ (show now) ++ " | " ++ (show $ prettyMemberList memberMap)                    -- Print membership
 
-sendGossip :: Map ID Node -> ID -> IO()
-sendGossip members myId = do
-  let otherMembers = Map.delete myId members
+sendGossip :: Map ID Node -> ID -> String -> IO()
+sendGossip members myId@(ID myHost myPort myTime) v6interface = do
+  let myV6Id = (ID (myHost ++ v6interface) myPort myTime)
+      otherMembers = Map.delete myId members
       notDead = filterDead members
       hosts = Prelude.map (\x -> (host x, port x)) $ keys otherMembers
       count = length hosts
@@ -157,7 +158,7 @@ sendGossip members myId = do
   chosenHosts <- sequence $ replicate numToSend $ randomRIO (0, (count - 1))
   sequence $ Prelude.map (\y -> let host = fst $ hosts !! y
                                     port = portFromWord $ snd $ hosts !! y in
-                                forkIO $ trySend host port myId $ show notDead) $ nub chosenHosts
+                                forkIO $ trySend host port myV6Id $ show notDead) $ nub chosenHosts
   return ()
 
 sendJoin :: ID -> ID -> PortID -> IO ()
@@ -278,14 +279,16 @@ portFromWord word = PortNumber $ fromIntegral word
 
 trySend :: HostName -> PortID -> ID -> String -> IO ()
 trySend host port (ID myHost myPort _) string = do
-  (try $ do
-      localAddr <- sockAddrFromHostAndPort myHost $ portFromWord 0
-      remoteAddr <- sockAddrFromHostAndPort host port
-      socket <- socketFromHostProtocolAndType host "tcp" Stream
-      bindSocket socket localAddr    
-      connect socket remoteAddr
-      send socket string
-      Network.Socket.sClose socket) :: IO (Either SomeException ())
+
+  localAddr <- sockAddrFromHostAndPort myHost $ portFromWord 0
+  remoteAddr <- sockAddrFromHostAndPort host port
+  socket <- socketFromHostProtocolAndType host "tcp" Stream
+  putStrLn $ "Local: " ++ (show localAddr)
+  putStrLn $ "Remote: " ++ (show remoteAddr)
+  bindSocket socket localAddr    
+  connect socket remoteAddr
+  send socket string
+  Network.Socket.sClose socket
   return ()   
   
 --  try $ Network.sendTo host port string :: IO (Either SomeException ())
