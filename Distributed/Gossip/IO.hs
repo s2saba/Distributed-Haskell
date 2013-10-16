@@ -189,7 +189,6 @@ runGossip filePath = do
   tmr <- repeatedTimer (doUpdate contact tFail myIdMVar ipv6Interface logMVar memberMVar) $ sDelay tGossip
   flusher <- repeatedTimer (modifyMVar logMVar flushLog) $ sDelay tflush
 
-  putStrLn "Returning new gossip!"
   return $ Gossip listener tmr flusher logMVar alive memberMVar
                        
 
