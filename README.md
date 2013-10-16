@@ -21,10 +21,12 @@ You need: Modules!
 Build the sample with: 
   
     ghc --make main.hs
+    
+(cabal makes it really easy to install the modules if the compiler barfs over them not existing.)
 
 Edit your config: `DHaskell.conf` (Instructions Inside!)
 
-Run across multiple machines and watch the membership lists!
+Run across multiple machines (even over IPv6) and watch the membership lists!
 
 ## Actually Use the Thing!
 
